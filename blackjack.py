@@ -5,18 +5,19 @@ All rights reserved.
 
 # Imports
 
-import random
+from random import shuffle
+from random import randint
 
 
 # Global variables
 
 # All suits of the standard deck
-suits = ('Hearts', 'Diamonds', 'Spades', 'Clubs')
+SUITS = ('Hearts', 'Diamonds', 'Spades', 'Clubs')
 # All cards in each suit of the standard deck
-ranks = ('2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace')
+RANKS = ('2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace')
 # Values for each of the cards in points
 # Ace can be 11 or 1 but this is controlled through code
-values = {
+VALUES = {
     '2': 2,
     '3': 3,
     '4': 4,
@@ -32,6 +33,8 @@ values = {
     'Ace': 11
 }
 
+BLACKJACK = 21
+
 
 # Script classes
 
@@ -40,15 +43,24 @@ class Card():
     Class to represent cards. Each card has a string representation to be printed on the
     screen when playing the game. It also has a value in points.
     '''
-    pass
+    def __init__(self, suit, rank, hand=None):
+        self.suit = suit
+        self.rank = rank
+        self.hand = hand
+        
+    def value(self):
+        if rank == 'Ace':
+            return self.__get_ace_value__()
+        return values[self.rank]
 
-class Ace(Card):
-    '''
-    Aces are treated as a special object because their value will be calculated based on
-    what's best for the player (it can be 1 or 11). All the other properties and methods
-    are inherited from the Card class.
-    '''
-    pass
+    def set_hand(self, hand):
+        self.hand = hand
+        return hand.calculate_points(self.value())
+
+    def __get_ace_value__(self):
+        if self.hand.points() > BLACKJACK:
+            return 1
+        return 11
 
 class Deck():
     '''
@@ -59,7 +71,27 @@ class Deck():
     There are to different types of decks depending on the type of game that the players want
     to play. See the classes that inherit from this one to know the differences in each of them.
     '''
-    pass
+    CARDS_IN_DECK = 52
+    
+    def __init__(self):
+        self.cards = []
+
+    def __init_standard_deck__(self):
+        standard_deck = []
+        for suit in SUITS:
+            for rank in RANKS:
+                card = Card(suit, rank)
+                standard_deck.append(card)
+        return standard_deck
+
+    def get_card(self):
+        return self.cards.pop(0)
+
+    def needs_shuffle(self):
+        raise NotImplementedError("Abstract method. Subclasses must define it")
+
+    def shuffle_deck(self):
+        shuffle(self.cards)
 
 class StandardDeck(Deck):
     '''
@@ -67,14 +99,34 @@ class StandardDeck(Deck):
     on top of the deck after each shuffling so that the cards are shuffled every time a new
     hand is going to be played.
     '''
-    pass
+    TOTAL_CARDS = Deck.CARDS_IN_DECK
+    
+    def __init__(self):
+        self.cards = Deck.__init_standard_deck__(self)
+
+    def needs_shuffle(self):
+        return True
 
 class SixPackDeck(Deck):
     '''
     This class represents the game that is played in the casinos. Six card decks are shuffled
     together and the 'plastic mark' is placed randomly between the last 60 - 80 cards.
     '''
-    pass
+    NUM_DECKS = 6
+    TOTAL_CARDS = Deck.CARDS_IN_DECK * NUM_DECKS
+    
+    def __init__(self):
+        Deck.__init__(self)
+        for i in range(0, 6):
+            self.cards.append(Deck.__init_standard_deck__(self))
+        self.shuffle_deck()
+        
+    def needs_shuffle(self):
+        return length(self.cards) <= plastic_mark:
+
+    def shuffle_deck(self):
+        Deck.shuffle_deck(self)
+        self.plastic_mark = randint(TOTAL_CARDS * 0.8, TOTAL_CARDS)
 
 class Hand():
     '''
