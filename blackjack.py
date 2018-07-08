@@ -62,6 +62,9 @@ class Card():
             return 1
         return 11
 
+    def __str__(self):
+        return rank + suit
+
 class Deck():
     '''
     Abstract class that provides the methods to be applied to the deck of cards that will
@@ -75,6 +78,7 @@ class Deck():
     
     def __init__(self):
         self.cards = []
+        self.discarded = []
 
     def __init_standard_deck__(self):
         standard_deck = []
@@ -133,14 +137,32 @@ class Hand():
     This class represents a hand of cards. It is initialized with 2 cards every round that is
     played. The two cards are drawn from the deck.
     '''
-    pass
+    def __init__(self):
+        self.cards = []
+        self.value = 0
+
+    def add_card(self, card):
+        self.cards.append(card)
+
+    def __str__(self):
+        print('Hand:')
+        for card in self.cards:
+            print(card)
 
 class DealerHand(Hand):
     '''
     This is the same as the Hand superclass but when printing it to the screen it hides the
     second card, which is the behavior for the Dealer hand.
     '''
-    pass
+    def __init__(self):
+        Hand.__init__(self)
+
+    def __str__(self):
+        print('Dealer Hand:')
+        print('[ HIDDEN ]')
+        cards_except_first = self.cards[1:]
+        for card in cards_except_first:
+            print(card)
 
 class Player():
     '''
@@ -148,7 +170,30 @@ class Player():
     has and the current hand in each of the rounds. 
     It contains the methods used to play the game like bet(), split()...
     '''
-    pass
+    def __init__(self, chips):
+        self.chips = chips
+
+    def game_options(self):
+        '''
+        This method allows the player to continue playing or retire.
+        It has to be called before the start of a new game.
+        '''
+        pass
+
+    def bet_options(self):
+        '''
+        This method allows the player to choose how much he wants to bet, if he wants to
+        double down or split, etc.
+        '''
+        pass
+
+    def card_options(self):
+        '''
+        This method allows the player to choose if he/she wants another card or prefers to stay.
+        '''
+        pass
+
+    def bet(self):
 
 class Dealer():
     '''
@@ -162,10 +207,33 @@ class Table():
     This is the class that represents the game. It has the dealer and players objects, the
     deck with the cards and the logic to run the game.
     '''
-    pass
+    def __init__(self):
+        self.__get_table_options__()
+
+    def __get_table_options__(self):
+        self.min_bet = get_int("Minimum bet: ", lambda num: 0 < num)
+        self.max_bet = get_int("Maximum bet: ", lambda num: num >= self.min_bet))
+        self.standard_deck = get_int("Decks used. Standard(1) or SixPack(2): ",
+            lambda num: num == 1 or num == 2)
 
 
 # Global functions
+
+def get_int(message, filter_func=(lambda num: True)):
+    '''
+    This method gets and int, ensuring the value entered by the user is correct.
+    '''
+    value = -1
+    filter_passed = false
+    while(!filter_passed):
+        value_str = input(message)
+        try:
+            value = int(value_str)
+            filter_passed = filter_func(value)
+        except ValueError:
+            print('Please, enter a valid integer.')
+
+    return value
 
 def start_game():
     '''
@@ -173,7 +241,9 @@ def start_game():
     It doesn't need any parameters and doesn't return anything.
     It is run if this script is run as '__main__'.
     '''
-    pass
+    table = Table()
+    dealer = Dealer()
+    player = Player()
 
 
 # Script call to main function
