@@ -5,6 +5,9 @@ All rights reserved.
 
 # Imports
 
+from os import system
+from enum import Enum
+from copy import deepcopy
 from random import shuffle
 from random import randint
 
@@ -49,21 +52,26 @@ class Card():
         self.hand = hand
         
     def value(self):
-        if rank == 'Ace':
+        if self.rank == 'Ace':
             return self.__get_ace_value__()
-        return values[self.rank]
+        return VALUES[self.rank]
 
     def set_hand(self, hand):
         self.hand = hand
-        return hand.calculate_points(self.value())
 
     def __get_ace_value__(self):
-        if self.hand.points() > BLACKJACK:
+        if self.hand.totalValue + 11 > BLACKJACK:
             return 1
         return 11
 
     def __str__(self):
-        return rank + suit
+        return self.rank + " " + self.suit
+    
+    def __eq__(self, other):
+        if not isinstance(other, Card):
+            # don't attempt to compare against unrelated types
+            return NotImplemented
+        return self.suit == other.suit and self.rank == other.rank
 
 class Deck():
     '''
@@ -89,12 +97,19 @@ class Deck():
         return standard_deck
 
     def get_card(self):
-        return self.cards.pop(0)
+        if not self.cards:
+            print('Deck empty. Reshuffling...')
+            self.shuffle_deck()
+            print('Deck ready.')
+        nextCard = self.cards.pop(0)
+        self.discarded.append(nextCard)
+        return nextCard
 
     def needs_shuffle(self):
         raise NotImplementedError("Abstract method. Subclasses must define it")
 
     def shuffle_deck(self):
+        self.cards += self.discarded
         shuffle(self.cards)
 
 class StandardDeck(Deck):
@@ -121,33 +136,99 @@ class SixPackDeck(Deck):
     
     def __init__(self):
         Deck.__init__(self)
-        for i in range(0, 6):
-            self.cards.append(Deck.__init_standard_deck__(self))
+        self.plastic_mark = 0
+        for _ in range(0, 6):
+            self.cards += Deck.__init_standard_deck__(self)
         self.shuffle_deck()
         
     def needs_shuffle(self):
-        return length(self.cards) <= plastic_mark:
+        return len(self.cards) <= self.plastic_mark
 
     def shuffle_deck(self):
         Deck.shuffle_deck(self)
-        self.plastic_mark = randint(TOTAL_CARDS * 0.8, TOTAL_CARDS)
+        self.plastic_mark = randint(int(SixPackDeck.TOTAL_CARDS * 0.8), SixPackDeck.TOTAL_CARDS)
 
 class Hand():
     '''
     This class represents a hand of cards. It is initialized with 2 cards every round that is
     played. The two cards are drawn from the deck.
     '''
-    def __init__(self):
-        self.cards = []
-        self.value = 0
+    def __init__(self, name = 'Hand'):
+        self.__cards = []
+        self.name = name
+        self.totalValue = None
+        self.dirtyTotal = False
+    
+    def get_hand_value(self):
+        if self.totalValue is None or self.dirtyTotal:
+            valueWithoutAces = self.__get_hand_value_excluding_aces__()
+            self.totalValue = valueWithoutAces + self.__get_aces_value__()
+            self.dirtyTotal = False
+        return self.totalValue
+    
+    def __get_aces_value__(self):
+        aces = [card for card in self.__cards if card.rank == 'Ace']
+        if self.totalValue is None:
+            if len(aces) == 0:
+                return 0
+            elif len(aces) == 1:
+                return 11
+            else:
+                return 11 + len(aces) - 1
+        else:
+            acesValues = [ace.value() for ace in aces]
+            return sum(acesValues)
 
-    def add_card(self, card):
-        self.cards.append(card)
+    def __get_hand_value_excluding_aces__(self):
+        cardValues = [card.value() for card in self.__cards if card.rank != 'Ace']
+        return sum(cardValues)
+
+    def add_card(self, deckOrCard):
+        card = deckOrCard
+        if isinstance(deckOrCard, Deck):
+            card = deckOrCard.get_card()
+        card.set_hand(self)
+        self.__cards.append(card)
+        self.dirtyTotal = True
+    
+    def get_cards(self):
+        return self.__cards
+    
+    def can_split_pair(self):
+        return len(self.__cards) == 2 and self.__cards[0] == self.__cards[1]
+    
+    def can_double_down(self):
+        return len(self.__cards) == 2 and self.get_hand_value() >= 9 and self.get_hand_value() <= 11
+
+    def split_hand(self, copiedObj = None):
+        splitHand = copiedObj
+        if self.can_split_pair():
+            # if the copy is not done we do it here
+            if splitHand is None:
+                splitHand = deepcopy(self)
+                splitHand.name = 'Split Hand'
+            # delete the proper cards from each hand to make the split
+            del splitHand.__cards[1]
+            del self.__cards[0]
+        return splitHand
+    
+    def is_natural(self):
+        if len(self.__cards) >= 2:
+            return self.__cards[0].value() + self.__cards[1].value() == BLACKJACK
+        return False
+    
+    def get_starting_hand(self, deck):
+        self.add_card(deck)
+        self.add_card(deck)
+    
+    def get_full_hand_string(self):
+        resultString = ''
+        for card in Hand.get_cards(self):
+            resultString = resultString + str(card) + '\n'
+        return resultString[:-1]
 
     def __str__(self):
-        print('Hand:')
-        for card in self.cards:
-            print(card)
+        return '{0}:\n'.format(self.name)
 
 class DealerHand(Hand):
     '''
@@ -156,13 +237,42 @@ class DealerHand(Hand):
     '''
     def __init__(self):
         Hand.__init__(self)
+    
+    def show_full_hand(self):
+        print('Hand:')
+        print(super().get_full_hand_string())
 
     def __str__(self):
-        print('Dealer Hand:')
-        print('[ HIDDEN ]')
-        cards_except_first = self.cards[1:]
+        resultString = super().__str__()
+        resultString += '[ HIDDEN ]\n'
+        cards_except_first = Hand.get_cards(self)[1:]
         for card in cards_except_first:
-            print(card)
+            resultString = resultString + str(card) + '\n'
+        return resultString[:-1]
+
+class PlayerHand(Hand):
+    '''
+    This class adds a bet value to the hand.
+    '''
+    def __init__(self):
+        Hand.__init__(self)
+        self.bet = 0
+    
+    def __str__(self):
+        resultString = super().__str__()
+        resultString = 'Bet placed: {0}\n'.format(self.bet)
+        return resultString + super().get_full_hand_string()
+
+    def split_hand(self):
+        splitHand = deepcopy(self)
+        splitHand.name = 'Split Hand'
+        return super().split_hand(splitHand)
+
+class HandResult(Enum):
+    DEALER_WINS = -1
+    DRAW = 0
+    PLAYER_WINS = 1
+    PLAYER_NATURAL = 2
 
 class Player():
     '''
@@ -170,37 +280,191 @@ class Player():
     has and the current hand in each of the rounds. 
     It contains the methods used to play the game like bet(), split()...
     '''
-    def __init__(self, chips):
+    def __init__(self, number, chips):
+        self.name = "Player {0}".format(number)
         self.chips = chips
+        self.hand = None
+        self.splitHand = None
+    
+    def __str__(self):
+        resultString = self.name + '\n'
+        resultString += 'Chips remaining: {0}\n'.format(self.chips)
+        if self.hand is not None:
+            resultString += str(self.hand)
+        if self.splitHand is not None:
+            resultString = resultString + '\n' + str(self.splitHand)
+        return resultString
+    
+    def __bet__(self, amount, handToBet):
+        if self.chips < amount:
+            raise PlayerError()
+        self.chips -= amount
+        handToBet.bet = amount
 
-    def game_options(self):
+    def split_pair(self, deck):
         '''
-        This method allows the player to continue playing or retire.
-        It has to be called before the start of a new game.
+        Let's the player choose if he/she wants to split pair.
         '''
-        pass
+        if self.hand is not None and self.hand.can_split_pair():
+            # ask player if he/she wants to split pairs
+            split = get_int("Split pairs? Yes(1) or No(0): ", filter_zero_one)
+            if split and self.chips >= self.hand.bet:
+                # create new hand
+                self.splitHand = self.hand.split_hand()
+                # update chips
+                self.chips -= self.hand.bet
+                # add card to each hand
+                self.hand.add_card(deck)
+                self.splitHand.add_card(deck)
+                print(self.hand)
+                print(self.splitHand)
+    
+    def double_down(self, handToDouble):
+        '''
+        Let's the player choose if he/she wants to double down the bet.
+        '''
+        # TODO: give just one card after doubling down and finish the turn
+        if handToDouble is not None and handToDouble.can_double_down():
+            # ask player if he/she wants to double down the hand
+            double = get_int("Double down {0}? Yes(1) or No(0): " \
+                .format(handToDouble.name), filter_zero_one)
+            if double and self.chips >= handToDouble.bet:
+                self.chips -= handToDouble.bet
+                handToDouble.bet *= 2
 
-    def bet_options(self):
-        '''
-        This method allows the player to choose how much he wants to bet, if he wants to
-        double down or split, etc.
-        '''
-        pass
-
-    def card_options(self):
+    def hit_or_stay(self, hand, deck):
         '''
         This method allows the player to choose if he/she wants another card or prefers to stay.
         '''
-        pass
+        option = get_int('Hit(1) or Stay(0)? ', filter_zero_one)
+        while option and hand.get_hand_value() < 21:
+            hand.add_card(deck)
+            print(hand)
+            if hand.get_hand_value() < 21:
+                option = get_int('Hit(1) or Stay(0)? ', filter_zero_one)
 
-    def bet(self):
+    def compare_hands(self, dealer_hand, player_hand):
+        '''
+        This method compares the player hand to the dealer hand passed as parameter and returns 1 if
+        the player's hand is better, 0 if they are tied and -1 if the dealer hand wins. 
+        '''
+        # first check natural Blackjack cases
+        if dealer_hand.is_natural():
+            if player_hand.is_natural():
+                return HandResult.DRAW
+            else:
+                return HandResult.DEALER_WINS
+        else:
+            dealerVal = dealer_hand.get_hand_value()
+            playerVal = player_hand.get_hand_value()
+            # player hand natural and dealer not
+            if player_hand.is_natural():
+                return HandResult.PLAYER_NATURAL
+            # player busted case
+            elif playerVal > BLACKJACK:
+                return HandResult.DEALER_WINS
+            else:
+                # dealer busted but player didn't
+                if dealerVal > BLACKJACK:
+                    return HandResult.PLAYER_WINS
+                else:
+                    # neither busted -> compare function: (a > b) - (a < b)
+                    return HandResult((playerVal > dealerVal) - (playerVal < dealerVal))
+
+    def payment(self, dealer_hand):
+        '''
+        This method checks the value bet by the player and adds the same value to the player's chips,
+        but multiplied by result_multiplier.
+        The result_multiplier parameter is the value returned by compare_hands. If the dealer won
+        it will be -1, and the value will be substracted from the player chips. If the player won it will
+        be 1 and the value will be added. Finally, if the match is a tie the result_multiplier will be
+        0 and no addition or substraction will happen.
+        '''
+        # start play on hand(s)
+        for hand in (self.hand, self.splitHand):
+            if hand is not None:
+                print(hand.name + ' -> Total: {0}'.format(hand.get_hand_value()))
+                compareResult = self.compare_hands(dealer_hand, hand)
+                if compareResult is HandResult.DEALER_WINS:
+                    # player loses, nothing to do as we substract the chips when making the bet
+                    print('You lose.')
+                elif compareResult is HandResult.DRAW:
+                    # draw, give back the chips
+                    print('Draw')
+                    self.chips += self.hand.bet
+                    pass
+                elif compareResult is HandResult.PLAYER_WINS:
+                    # player wins, give back the bet x 2
+                    print('You win!')
+                    self.chips += self.hand.bet * 2
+                    pass
+                elif compareResult is HandResult.PLAYER_NATURAL:
+                    # player natural, payment = bet x 2.5
+                    print('BLACKJACK!')
+                    self.chips += self.hand.bet * 2.5
+                    pass
+
+    def play(self, deck):
+        # if player has a Blackjack return
+        if self.hand.is_natural(): return
+        # check if the player can and want to split pairs
+        self.split_pair(deck)
+        # check if the player can and want to double down on his hand
+        self.double_down(self.hand)
+        # check if the player can and want to double down on his split hand
+        self.double_down(self.splitHand)
+
+        # start play on hand(s)
+        for hand in (self.hand, self.splitHand):
+            if hand is not None:
+                print(hand.name + ':')
+                self.hit_or_stay(hand, deck)
+    
+    def new_hand(self, deck):
+        self.hand = PlayerHand()
+        # TODO: check that bet is bigger than min_bet and lesser than max_bet
+        betToPlace = get_int('How many chips do you want to bet? ', \
+            lambda val, currentChips = self.chips: val > 0 and val <= currentChips, \
+            'You don\'t have enough chips or you don\'t meet the betting criteria')
+        self.__bet__(betToPlace, self.hand)
+        self.hand.get_starting_hand(deck)
 
 class Dealer():
     '''
     Class to represent the dealer of the game. It contains the logic for the Dealer to play
     against the players. This is the same logic used in the casinos.
     '''
-    pass
+    def __init__(self):
+        self.hand = None
+    
+    def play(self, deck):
+        '''
+        Dealer plays with the same rules always. If the card total is 16 points or lower,
+        the dealer will always draw another card from the deck.
+        '''
+        while self.hand.get_hand_value() < 17 and not self.hand.get_hand_value() > BLACKJACK:
+            newCard = deck.get_card()
+            self.hand.add_card(newCard)
+            print(newCard)
+    
+    def new_hand(self, deck):
+        '''
+        Starts a new hand for the dealer. The deck is passed by the Table.
+        '''
+        self.hand = DealerHand()
+        self.hand.get_starting_hand(deck)
+    
+    def reveal_hand(self):
+        '''
+        Prints the hand of the dealer, including the hidden card.
+        '''
+        print('Dealer\n')
+        self.hand.show_full_hand()
+
+    def __str__(self):
+        resultString = 'Dealer\n'
+        resultString += str(self.hand)
+        return resultString
 
 class Table():
     '''
@@ -208,30 +472,124 @@ class Table():
     deck with the cards and the logic to run the game.
     '''
     def __init__(self):
-        self.__get_table_options__()
+        # define variables
+        self.deck = None
+        self.players = []
+        self.dealer = Dealer()
+        # get options for table
+        self.min_bet = get_int("Minimum bet: ", filter_positive_int)
+        self.max_bet = get_int("Maximum bet: ", lambda num, min_bet = self.min_bet: num >= min_bet)
+        self.deck_type = get_int("Deck type. Standard(0) or SixPack(1): ", filter_zero_one)
+        self.num_players = get_int("Number of players: ", filter_positive_int)
+        # init variables
+        self.__init_deck__()
+        self.__init_players__()
 
-    def __get_table_options__(self):
-        self.min_bet = get_int("Minimum bet: ", lambda num: 0 < num)
-        self.max_bet = get_int("Maximum bet: ", lambda num: num >= self.min_bet))
-        self.standard_deck = get_int("Decks used. Standard(1) or SixPack(2): ",
-            lambda num: num == 1 or num == 2)
+    def __init_deck__(self):
+        if self.deck_type == 0:
+            self.deck = StandardDeck()
+        elif self.deck_type == 1:
+            self.deck = SixPackDeck()
+
+    def __init_players__(self):
+        for index in range(0, self.num_players):
+            print("Player {0}:".format(index + 1))
+            player_chips = get_int("How many chips do you want to buy? ", filter_positive_int)
+            self.players.append(Player(index, player_chips))
+
+    def __bets_payment__(self):
+        for player in self.players:
+            # clean screen
+            system('clear')
+            print('Dealer -> Total: {0}'.format(self.dealer.hand.get_hand_value()))
+            print(player.name)
+            player.payment(self.dealer.hand)
+            input('\nPress any key to continue...')
+
+    def __play_again__(self):
+        # clean screen
+        system('clear')
+        current_players = self.players
+        for player in current_players:
+            print(player.name + ':')
+            print('You have {0} chips remaining.'.format(player.chips))
+            play = get_int("Another hand? Yes(1) or No(0): ", filter_zero_one)
+            if not play:
+                self.players.remove(player)
+
+    def __play_player_hand__(self, player):
+        # clean screen
+        system('clear')
+        # show dealer hand
+        print(self.dealer)
+        print('')
+        # show player hand
+        print(player)
+        print('')
+        try:
+            player.play(self.deck)
+        except PlayerError:
+            self.players.remove(player)
+            print('Something went wrong. {0} kicked from game.'.format(player.name))
+        input('\nPress any key to continue...')
+    
+    def __play_dealer_hand__(self):
+        # clean screen
+        system('clear')
+        # show dealer hand
+        self.dealer.reveal_hand()
+        self.dealer.play(self.deck)
+        input('\nPress any key to continue...')
+    
+    def play(self):
+        while len(self.players) > 0:
+            system('clear')
+            print('Starting new hand')
+            # reshuffle the deck if needed
+            if self.deck.needs_shuffle():
+                self.deck.shuffle_deck()
+            # init the hands of everyone in the table
+            for player in self.players:
+                try:
+                    player.new_hand(self.deck)
+                except PlayerError:
+                    self.players.remove(player)
+                    print('Something went wrong. {0} kicked from game.'.format(player.name))
+            self.dealer.new_hand(self.deck)
+            # begin game
+            for player in self.players:
+                self.__play_player_hand__(player)
+            self.__play_dealer_hand__()
+            # end game
+            self.__bets_payment__()
+            self.__play_again__()
+        # no more players in table, so exit
+
+class PlayerError(Exception):
+    pass
 
 
 # Global functions
+    
+def filter_zero_one(value):
+    return value == 0 or value == 1
 
-def get_int(message, filter_func=(lambda num: True)):
+def filter_positive_int(value):
+    return 0 < value
+
+def get_int(message, filter_func=(lambda num: True), errMsg='Please, enter a valid value.'):
     '''
     This method gets and int, ensuring the value entered by the user is correct.
     '''
     value = -1
-    filter_passed = false
-    while(!filter_passed):
+    filter_passed = False
+    while(not filter_passed):
         value_str = input(message)
         try:
             value = int(value_str)
             filter_passed = filter_func(value)
         except ValueError:
-            print('Please, enter a valid integer.')
+            print(errMsg)
 
     return value
 
@@ -241,13 +599,14 @@ def start_game():
     It doesn't need any parameters and doesn't return anything.
     It is run if this script is run as '__main__'.
     '''
+    system('clear')
+    print('Welcome to Terminal Blackjack!')
     table = Table()
-    dealer = Dealer()
-    player = Player()
+    table.play()
+    print("See you soon!")
 
 
 # Script call to main function
 
 if __name__ == '__main__':
     start_game()
-
