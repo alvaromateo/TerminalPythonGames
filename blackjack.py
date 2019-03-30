@@ -38,6 +38,15 @@ VALUES = {
 
 BLACKJACK = 21
 
+# 'testMode' variable is for testing different game situations.
+# It only works with 1 player!!
+# 0 -> testing mode disabled. Normal game
+# 1 -> split pairs
+# 2 -> double down
+# 3 -> player natural
+# 4 -> player and dealer naturals
+# 5 -> split and double down
+testMode = 2
 
 # Script classes
 
@@ -110,7 +119,15 @@ class Deck():
 
     def shuffle_deck(self):
         self.cards += self.discarded
+        self.discarded = []
         shuffle(self.cards)
+    
+    def test_hand(self):
+        self.shuffle_deck()
+        # set the first cards in the same order as in 'testCards'
+        for i, card in enumerate(testCards[testMode]):
+            cardIndex = self.cards.index(card)
+            self.cards[i], self.cards[cardIndex] = self.cards[cardIndex], self.cards[i]
 
 class StandardDeck(Deck):
     '''
@@ -121,6 +138,7 @@ class StandardDeck(Deck):
     TOTAL_CARDS = Deck.CARDS_IN_DECK
     
     def __init__(self):
+        Deck.__init__(self)
         self.cards = Deck.__init_standard_deck__(self)
 
     def needs_shuffle(self):
@@ -140,9 +158,13 @@ class SixPackDeck(Deck):
         for _ in range(0, 6):
             self.cards += Deck.__init_standard_deck__(self)
         self.shuffle_deck()
-        
+    
+    def get_card(self):
+        self.plastic_mark -= 1
+        return Deck.get_card(self)
+
     def needs_shuffle(self):
-        return len(self.cards) <= self.plastic_mark
+        return self.plastic_mark <= 0
 
     def shuffle_deck(self):
         Deck.shuffle_deck(self)
@@ -156,11 +178,11 @@ class Hand():
     def __init__(self, name = 'Hand'):
         self.__cards = []
         self.name = name
-        self.totalValue = None
+        self.totalValue = 0
         self.dirtyTotal = False
     
     def get_hand_value(self):
-        if self.totalValue is None or self.dirtyTotal:
+        if self.totalValue == 0 or self.dirtyTotal:
             valueWithoutAces = self.__get_hand_value_excluding_aces__()
             self.totalValue = valueWithoutAces + self.__get_aces_value__()
             self.dirtyTotal = False
@@ -168,7 +190,7 @@ class Hand():
     
     def __get_aces_value__(self):
         aces = [card for card in self.__cards if card.rank == 'Ace']
-        if self.totalValue is None:
+        if self.totalValue == 0:
             if len(aces) == 0:
                 return 0
             elif len(aces) == 1:
@@ -257,6 +279,7 @@ class PlayerHand(Hand):
     def __init__(self):
         Hand.__init__(self)
         self.bet = 0
+        self.playable = True
     
     def __str__(self):
         resultString = super().__str__()
@@ -319,11 +342,10 @@ class Player():
                 print(self.hand)
                 print(self.splitHand)
     
-    def double_down(self, handToDouble):
+    def double_down(self, handToDouble, deck):
         '''
         Let's the player choose if he/she wants to double down the bet.
         '''
-        # TODO: give just one card after doubling down and finish the turn
         if handToDouble is not None and handToDouble.can_double_down():
             # ask player if he/she wants to double down the hand
             double = get_int("Double down {0}? Yes(1) or No(0): " \
@@ -331,17 +353,22 @@ class Player():
             if double and self.chips >= handToDouble.bet:
                 self.chips -= handToDouble.bet
                 handToDouble.bet *= 2
+                handToDouble.add_card(deck)
+                print(handToDouble)
+                handToDouble.playable = False
 
     def hit_or_stay(self, hand, deck):
         '''
         This method allows the player to choose if he/she wants another card or prefers to stay.
         '''
         option = get_int('Hit(1) or Stay(0)? ', filter_zero_one)
-        while option and hand.get_hand_value() < 21:
+        while option and hand.playable:
             hand.add_card(deck)
             print(hand)
             if hand.get_hand_value() < 21:
                 option = get_int('Hit(1) or Stay(0)? ', filter_zero_one)
+            else:
+                hand.playable = False
 
     def compare_hands(self, dealer_hand, player_hand):
         '''
@@ -410,23 +437,36 @@ class Player():
         # check if the player can and want to split pairs
         self.split_pair(deck)
         # check if the player can and want to double down on his hand
-        self.double_down(self.hand)
+        self.double_down(self.hand, deck)
         # check if the player can and want to double down on his split hand
-        self.double_down(self.splitHand)
+        self.double_down(self.splitHand, deck)
 
         # start play on hand(s)
         for hand in (self.hand, self.splitHand):
-            if hand is not None:
+            if hand is not None and hand.playable:
                 print(hand.name + ':')
                 self.hit_or_stay(hand, deck)
-    
-    def new_hand(self, deck):
+
+    def new_hand(self, deck, min_bet, max_bet):
+        print('Starting new hand')
+        print(self.name + ':')
+
+        if self.chips < min_bet:
+            raise PlayerError()
+
+        def bet_check(val):
+            return val > 0 and val <= self.chips and val >= min_bet and val <= max_bet
+
         self.hand = PlayerHand()
-        # TODO: check that bet is bigger than min_bet and lesser than max_bet
-        betToPlace = get_int('How many chips do you want to bet? ', \
-            lambda val, currentChips = self.chips: val > 0 and val <= currentChips, \
-            'You don\'t have enough chips or you don\'t meet the betting criteria')
-        self.__bet__(betToPlace, self.hand)
+        bet_to_place = get_int('How many chips do you want to bet? ', filter_positive_int)
+        while not bet_check(bet_to_place):
+            if bet_to_place > self.chips:
+                print('You don\'t have that many chips.')
+            else:
+                print('Bet must be between {0} and {1} chips.'.format(min_bet, max_bet))
+            bet_to_place = get_int('How many chips do you want to bet? ', filter_positive_int)
+
+        self.__bet__(bet_to_place, self.hand)
         self.hand.get_starting_hand(deck)
 
 class Dealer():
@@ -493,7 +533,7 @@ class Table():
 
     def __init_players__(self):
         for index in range(0, self.num_players):
-            print("Player {0}:".format(index + 1))
+            print("Player {0}:".format(index))
             player_chips = get_int("How many chips do you want to buy? ", filter_positive_int)
             self.players.append(Player(index, player_chips))
 
@@ -509,11 +549,18 @@ class Table():
     def __play_again__(self):
         # clean screen
         system('clear')
-        current_players = self.players
-        for player in current_players:
+        current_players = {}
+        for player in self.players:
+            play = False
             print(player.name + ':')
             print('You have {0} chips remaining.'.format(player.chips))
-            play = get_int("Another hand? Yes(1) or No(0): ", filter_zero_one)
+            if player.chips < self.min_bet:
+                print('You don\'t have enough chips to play.')
+                input('\nPress any key to continue...')
+            else:
+                play = get_int("Another hand? Yes(1) or No(0): ", filter_zero_one)
+            current_players[player] = play
+        for (player, play) in current_players.items():
             if not play:
                 self.players.remove(player)
 
@@ -544,14 +591,16 @@ class Table():
     def play(self):
         while len(self.players) > 0:
             system('clear')
-            print('Starting new hand')
             # reshuffle the deck if needed
-            if self.deck.needs_shuffle():
-                self.deck.shuffle_deck()
+            if self.deck.needs_shuffle() or testMode != 0:
+                if testMode == 0:
+                    self.deck.shuffle_deck()
+                else:
+                    self.deck.test_hand()
             # init the hands of everyone in the table
             for player in self.players:
                 try:
-                    player.new_hand(self.deck)
+                    player.new_hand(self.deck, self.min_bet, self.max_bet)
                 except PlayerError:
                     self.players.remove(player)
                     print('Something went wrong. {0} kicked from game.'.format(player.name))
@@ -570,7 +619,7 @@ class PlayerError(Exception):
 
 
 # Global functions
-    
+
 def filter_zero_one(value):
     return value == 0 or value == 1
 
@@ -604,7 +653,37 @@ def start_game():
     table = Table()
     table.play()
     print("See you soon!")
+    # TODO: double down no funciona
+    # TODO: cuando el jugador tiene natural y el dealer no, da draw. deberia ganar el jugador
+    # TODO: test all testModes
 
+
+testCards = {
+    1: [
+        Card('Hearts', '8'),
+        Card('Diamonds', '8')
+    ],
+    2: [
+        Card('Hearts', '6'),
+        Card('Diamonds', '4')
+    ],
+    3: [
+        Card('Hearts', 'Ace'),
+        Card('Diamonds', 'King')
+    ],
+    4: [
+        Card('Hearts', 'Ace'),
+        Card('Diamonds', 'King'),
+        Card('Spades', 'Ace'),
+        Card('Clubs', 'Queen')
+    ],
+    5: [
+        Card('Hearts', '8'),
+        Card('Diamonds', '8'),
+        Card('Spades', '2'),
+        Card('Clubs', '3')
+    ]
+}
 
 # Script call to main function
 
