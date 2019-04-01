@@ -46,7 +46,8 @@ BLACKJACK = 21
 # 3 -> player natural
 # 4 -> player and dealer naturals
 # 5 -> split and double down
-testMode = 2
+# 6 -> player natural (not dealer natural)
+testMode = 0
 
 # Script classes
 
@@ -69,7 +70,21 @@ class Card():
         self.hand = hand
 
     def __get_ace_value__(self):
-        if self.hand.totalValue + 11 > BLACKJACK:
+        if self.hand.dirtyTotal:
+            return self.__one_or_eleven__(self.hand.totalValue)
+        else:
+            handValue = 0
+            for card in self.hand.get_cards():
+                if card is not self:
+                    if card.rank != 'Ace':
+                        handValue += card.value()
+                    else:
+                        handValue += self.__one_or_eleven__(handValue)
+            # now we have the value of all the cards in handValue except for this 'self' card
+            return self.hand.totalValue - handValue
+
+    def __one_or_eleven__(self, handValue):
+        if handValue + 11 > BLACKJACK:
             return 1
         return 11
 
@@ -217,7 +232,7 @@ class Hand():
         return self.__cards
     
     def can_split_pair(self):
-        return len(self.__cards) == 2 and self.__cards[0] == self.__cards[1]
+        return len(self.__cards) == 2 and self.__cards[0].rank == self.__cards[1].rank
     
     def can_double_down(self):
         return len(self.__cards) == 2 and self.get_hand_value() >= 9 and self.get_hand_value() <= 11
@@ -340,7 +355,9 @@ class Player():
                 self.hand.add_card(deck)
                 self.splitHand.add_card(deck)
                 print(self.hand)
+                print('')
                 print(self.splitHand)
+            print('')
     
     def double_down(self, handToDouble, deck):
         '''
@@ -348,14 +365,20 @@ class Player():
         '''
         if handToDouble is not None and handToDouble.can_double_down():
             # ask player if he/she wants to double down the hand
+            print(handToDouble)
             double = get_int("Double down {0}? Yes(1) or No(0): " \
                 .format(handToDouble.name), filter_zero_one)
-            if double and self.chips >= handToDouble.bet:
-                self.chips -= handToDouble.bet
-                handToDouble.bet *= 2
-                handToDouble.add_card(deck)
-                print(handToDouble)
-                handToDouble.playable = False
+            if double:
+                if self.chips >= handToDouble.bet:
+                    self.chips -= handToDouble.bet
+                    handToDouble.bet += handToDouble.bet
+                    cardToAdd = deck.get_card()
+                    handToDouble.add_card(cardToAdd)
+                    print(cardToAdd)
+                    handToDouble.playable = False
+                else:
+                    print('You don\'t have enough chips to double down.')
+            print('')
 
     def hit_or_stay(self, hand, deck):
         '''
@@ -428,7 +451,7 @@ class Player():
                 elif compareResult is HandResult.PLAYER_NATURAL:
                     # player natural, payment = bet x 2.5
                     print('BLACKJACK!')
-                    self.chips += self.hand.bet * 2.5
+                    self.chips += int(self.hand.bet * 2.5)
                     pass
 
     def play(self, deck):
@@ -598,20 +621,27 @@ class Table():
                 else:
                     self.deck.test_hand()
             # init the hands of everyone in the table
+            playersToRemove = []
             for player in self.players:
                 try:
                     player.new_hand(self.deck, self.min_bet, self.max_bet)
                 except PlayerError:
-                    self.players.remove(player)
                     print('Something went wrong. {0} kicked from game.'.format(player.name))
-            self.dealer.new_hand(self.deck)
-            # begin game
-            for player in self.players:
-                self.__play_player_hand__(player)
-            self.__play_dealer_hand__()
-            # end game
-            self.__bets_payment__()
-            self.__play_again__()
+                    input('\nPress any key to continue...')
+                    playersToRemove.append(player)
+            # take care of players that may have been kicked
+            for player in playersToRemove:
+                self.players.remove(player)
+            # if there are still players left, init the dealer hand and start the game
+            if len(self.players) > 0:
+                self.dealer.new_hand(self.deck)
+                # begin game
+                for player in self.players:
+                    self.__play_player_hand__(player)
+                self.__play_dealer_hand__()
+                # end game
+                self.__bets_payment__()
+                self.__play_again__()
         # no more players in table, so exit
 
 class PlayerError(Exception):
@@ -653,8 +683,6 @@ def start_game():
     table = Table()
     table.play()
     print("See you soon!")
-    # TODO: double down no funciona
-    # TODO: cuando el jugador tiene natural y el dealer no, da draw. deberia ganar el jugador
     # TODO: test all testModes
 
 
@@ -680,8 +708,17 @@ testCards = {
     5: [
         Card('Hearts', '8'),
         Card('Diamonds', '8'),
+        Card('Spades', '6'),
+        Card('Clubs', '7'),
         Card('Spades', '2'),
         Card('Clubs', '3')
+    ],
+    6: [
+        Card('Hearts', 'Ace'),
+        Card('Diamonds', 'King'),
+        Card('Spades', '6'),
+        Card('Clubs', 'Queen'),
+        Card('Hearts', '5')
     ]
 }
 
